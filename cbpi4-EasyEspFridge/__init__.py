@@ -1,77 +1,58 @@
-
-# -*- coding: utf-8 -*-
-import os
-from aiohttp import web
-import logging
-from unittest.mock import MagicMock, patch
 import asyncio
-import random
+import aiohttp
 from cbpi.api import *
 
-logger = logging.getLogger(__name__)
-
-
-class CustomWebExtension(CBPiExtension):
-
-    @request_mapping(path="/", auth_required=False)
-    async def hello_world(self, request):
-        return web.HTTPFound('static/index.html')
-
-    def __init__(self, cbpi):
-        self.cbpi = cbpi
-        path = os.path.dirname(__file__)
-        self.cbpi.register(self, "/cbpi_uiplugin", static=os.path.join(path, "static"))
-
-
-@parameters([])
-class CustomSensor(CBPiSensor):
-    
+@parameters([
+    Property.Text(
+        label="Address",
+        description="Please enter the address of your device. E.g.: 192.168.0.5 or esp.fritz.box"
+    ),
+    Property.Select(
+        label="TaskId",
+        description="Can be found in EasyESP->Devices->Task **number**",
+        options=list(range(1, 13))
+    ),
+    Property.Select(
+        label="ReadingInterval",
+        description="Select the delay between reading the values in seconds",
+        options=list(range(1, 61, 3))
+    )
+])
+class EasyEspFridgeSensor(CBPiSensor):
     def __init__(self, cbpi, id, props):
-        super(CustomSensor, self).__init__(cbpi, id, props)
+        super().__init__(cbpi, id, props)
         self.value = 0
+        self.address = self.props.get("Address")  # Device address
+        self.taskId = self.props.get("TaskId")  # Task ID from EasyESP
+        self.interval = int(self.props.get("ReadingInterval"))  # Reading interval in seconds
 
-    @action(key="Test", parameters=[])
-    async def action1(self, **kwargs):
-        print("ACTION!", kwargs)
+        # Constructing the URL for HTTP GET request
+        self.url = f"http://{self.address}/json?tasknr={self.taskId}&view=sensorupdate"
+
+    async def read_sensor(self):
+        """Reads the sensor value from the specified ESP device."""
+        async with aiohttp.ClientSession() as session:
+            try:
+                async with session.get(self.url) as response:
+                    if response.status == 200:
+                        data = await response.json()
+                        # Extracts the temperature value from the JSON response
+                        self.value = float(data['TaskValues'][0]['Value'])
+                        self.push_update(self.value)
+                    else:
+                        # Notifies on status code other than 200
+                        self.cbpi.notify("EasyEspFridge Error", f"Failed to read sensor data. HTTP Status: {response.status}", type="danger")
+            except Exception as e:
+                # Handles exceptions during the HTTP request
+                self.cbpi.notify("EasyEspFridge Error", f"Exception while reading sensor data: {str(e)}", type="danger")
 
     async def run(self):
-        while self.running is True:
-            self.value = random.randint(0,50)
+        """Main loop to continuously read sensor values at the specified interval."""
+        while self.running:
+            await self.read_sensor()
+            self.log_data(self.value)
             self.push_update(self.value)
-            await asyncio.sleep(1)
-    
-    def get_state(self):
-        return dict(value=self.value)
-
-@parameters([])
-class CustomActor(CBPiActor):
-
-    @action("action", parameters={})
-    async def action(self, **kwargs):
-        print("Action Triggered", kwargs)
-        pass
-    
-    def on_start(self):
-        self.state = False
-        pass
-
-    async def on(self, power=0):
-        logger.info("ACTOR 1111 %s ON" % self.id)
-        self.state = True
-
-    async def off(self):
-        logger.info("ACTOR %s OFF " % self.id)
-        self.state = False
-
-    def get_state(self):
-        return self.state
-    
-    async def run(self):
-        pass
-
+            await asyncio.sleep(self.interval)  # Waits for the specified interval before the next read
 
 def setup(cbpi):
-    #cbpi.plugin.register("MyCustomActor", CustomActor)
-    #cbpi.plugin.register("MyCustomSensor", CustomSensor)
-    #cbpi.plugin.register("MyustomWebExtension", CustomWebExtension)
-    pass
+    cbpi.plugin.register("EasyEsp Sensor", EasyEspFridgeSensor)

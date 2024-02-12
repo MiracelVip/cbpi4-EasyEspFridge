@@ -2,10 +2,10 @@ from setuptools import setup
 
 setup(name='cbpi4-EasyEspFridge',
       version='0.0.1',
-      description='CraftBeerPi Plugin',
-      author='',
+      description='Read Sensor Values from an EasyEsp device.',
+      author='MiraeclVip',
       author_email='',
-      url='',
+      url='https://github.com/MiracelVip/cbpi4-EasyEspFridge',
       include_package_data=True,
       package_data={
         # If any package contains *.txt or *.rst files, include them:
